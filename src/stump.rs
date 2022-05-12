@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use ndarray::prelude::*;
+use crate::dataset::Dataset;
+
 
 pub struct Stump {
     //pub value: T,
@@ -21,11 +24,11 @@ impl Stump {
         }
     }
 
-    pub fn predict(&self, values: Vec<f64>) -> Vec<i32> {
+    pub fn predict(&self, values: &Array1<f64>) -> Vec<i32> {
         let tres = self.treshold.unwrap();
 
-        let filt = |i: f64| -> i32 {
-            if i < tres {
+        let filt = |i: &f64| -> i32 {
+            if *i < tres {
                 -1
             } else {
                 1
@@ -37,43 +40,40 @@ impl Stump {
 }
 
 
-
-pub struct DatasetTuple {
-    datafeatures: Vec<f64>,
-    features_map: HashMap<usize, String>,
-
-}
-
-
-pub struct Adaboost_Model {
+pub struct AdaboostModel {
     classifiers: Vec<Stump>,
 }
 
-impl Adaboost_Model {
+impl AdaboostModel {
     pub fn new(n_classifiers: usize) -> Self {
-        let mut result = Adaboost_Model {
+        let mut result = AdaboostModel {
             classifiers: Vec::new(),
         };
-        for i in 0..n_classifiers {
+        for _i in 0..n_classifiers {
             result.classifiers.push(Stump::new());
         }
         result
     }
-    pub fn get_prediction(&self, sample: &Vec<f64>) -> i32 {
+    pub fn get_prediction(&self, sample: &[f64]) -> i32 {
         0
     }
 
-    pub fn fit(&mut self, samplesX: &Vec<Vec<f64>>, labelsY: &Vec<i32>) {
-        let n_features = samplesX[0].len();
+    pub fn fit(&mut self, dataset: &Dataset) {
+        let features_count = dataset.get_n_features();
+        let labels = dataset.get_labels();
+        let data = dataset.get_data();
+
+
         for stump in &mut self.classifiers {
             let mut lowest_err = f64::INFINITY;
 
-            for feature in 0..n_features {
-                
+            for feature_id in 0..features_count {
+                let data_col = data.column(feature_id);
             }
             
         }
+        
 
-        for tuple in samplesX {}
+        //for tuple in samplesX {}
     }
 }
