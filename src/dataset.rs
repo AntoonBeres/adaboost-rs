@@ -7,9 +7,9 @@ use std::str::FromStr;
 /// A Dataset object for easy use in machine-learning algorithms
 pub struct Dataset {
     /// The headers, describing the columns in the dataset
-    pub headers: Vec<String>,
+    headers: Vec<String>,
     /// The actual data in the dataset
-    pub data: Array2<f64>,
+    data: Option<Array2<f64>>,
     /// The labels of the dataset in the form integers
     labels: Vec<i64>,
     /// A mapping of label-id's to their actual names
@@ -23,7 +23,7 @@ impl Dataset {
     }
     /// Get an immutable reference to the data of the dataset
     pub fn get_data(&self) -> &Array2<f64> {
-        &self.data
+        &self.data.expect("Dataset memory has been freed!")
     }
     /// Get an immutable reference to the data-labels
     pub fn get_labels(&self) -> &Vec<i64> {
@@ -36,7 +36,10 @@ impl Dataset {
 
     pub fn get_headers(&self) -> &Vec<String> {
         &self.headers
-    } 
+    }
+    pub fn free_dset_memory(&mut self) {
+        self.data = None;
+    }
 }
 /**
  * DatasetBuilder: builder-pattern, struct to load and prepare a dataset
@@ -122,7 +125,7 @@ impl DatasetBuilder {
         let labels: Vec<i64> = labels.into_iter().map(|x| inverse_mapping[&x]).collect();
 
         Dataset {
-            data: features,
+            data: Some(features),
             labels,
             label_names: label_mapping,
             headers: new_headers,
