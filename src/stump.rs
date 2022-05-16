@@ -1,23 +1,65 @@
 // writing this in rust was a mistake, help :(
+// 
 
 #![allow(dead_code)]
 use crate::dataset::Dataset;
 use itertools::Itertools;
 use ndarray::prelude::*;
 
+/// A simple enum for representing the polarity of the stump 
+/// Used so that values are limited to +1 and -1
+///
+/// Also could get optimized away by the compiler to use less memory than a full i32/i8 when using
+/// lots classifiers
+enum Polarity {
+    Positive,
+    Negative,
+}
+
+impl Polarity {
+    fn i32(&self) -> i32 {
+        match self {
+            Self::Positive => 1,
+            Self::Negative => -1,
+        }
+    }
+    fn f64(&self) -> f64 {
+        match self {
+            Self::Positive => 1.,
+            Self::Negative => -1.,
+        }
+    }
+    fn bool(&self) -> bool {
+        match self {
+            Self::Positive => true,
+            Self::Negative => false,
+        }
+    }
+}
+
+
+
+
+
+/// A weak-learning stump, essentially a binary tree with 2 branches and height 1
+/// Through boosting, many weak learners together perform like a strong learner
+///
+/// # TLDR
+/// Stump alone weak. Stumps together strong
 pub struct Stump {
-    //pub value: T,
-    //pub prediction: Option<i64>,
+    /// Treshold of the stump
     treshold: Option<f64>,
-    polarity: i32,
+    /// Polarity of the stump, -1 or +1
+    polarity: Polarity,
     alpha: f64,
+    /// The feature_id the stump uses for its predictions
     feature_id: usize,
 }
 
 impl Stump {
     pub fn new() -> Self {
         Stump {
-            polarity: 1,
+            polarity: Polarity::Positive,
             treshold: None,
             alpha: 0.,
             feature_id: 0,
@@ -30,8 +72,8 @@ impl Stump {
             .column(self.feature_id)
             .iter()
             .map(|x| match x {
-                x if *x < tres => -self.polarity,
-                x if *x >= tres => self.polarity,
+                x if *x < tres => -self.polarity.i32(),
+                x if *x >= tres => self.polarity.i32(),
                 _ => panic!("this should never happen, is x nan?"),
             })
             .collect()
@@ -55,7 +97,6 @@ impl AdaboostModel {
         result
     }
     pub fn get_prediction(&self, samples: &Array2<f64>) -> Vec<i32> {
-
         let predicts: Vec<Vec<f64>> = self
             .classifiers
             .iter()
@@ -124,7 +165,7 @@ impl AdaboostModel {
 
                 tholds.iter().for_each(|t| {
                     let mut predictions: Vec<i64> = vec![1; labels.len()];
-                    let mut p = 1;
+                    let mut p = Polarity::Positive;
 
                     predictions
                         .iter_mut()
@@ -135,6 +176,7 @@ impl AdaboostModel {
                             }
                         });
 
+                    // Calculate the error
                     let mut error: f64 = labels
                         .iter()
                         .zip(predictions.iter())
@@ -150,11 +192,14 @@ impl AdaboostModel {
                         )
                         .sum();
 
-                    //println!("{}", error);
+                    // If the error is greater than 0.5, invert the weak learning stump, by
+                    // inverting the polarity
                     if error > 0.5 {
                         error = 1. - error;
-                        p = -1;
+                        p = Polarity::Negative;
                     }
+                    // If this error is smaller than the previously smallest error, update the
+                    // stump classifier
                     if error < lowest_err {
                         stump.polarity = p;
                         stump.treshold = Some(*t);
@@ -168,6 +213,7 @@ impl AdaboostModel {
                 * ((1.0 - lowest_err + f64::MIN_POSITIVE) / (lowest_err + f64::MIN_POSITIVE)).ln();
             let preds = stump.predict(data);
 
+            // Update the weights of the samples
             weights
                 .iter_mut()
                 .zip(labels.iter())
@@ -182,7 +228,8 @@ impl AdaboostModel {
             });
         }
 
-        //free the dataset from memory after training is done
+        // free the dataset from memory after training is done, this is done for memory-efficiency
+        // reasons
         self.dataset.free_dset_memory();
     }
 }
