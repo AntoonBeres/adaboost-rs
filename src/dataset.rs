@@ -118,17 +118,14 @@ impl DatasetBuilder {
         let mut label_mapping: HashMap<i64, String> = HashMap::new();
         let mut inverse_mapping: HashMap<String, i64> = HashMap::new();
         for (index, element) in unique_labels.iter().enumerate() {
-            
-             let label: i64 =  match index {
+            let label: i64 = match index {
                 0 => -1,
                 1 => 1,
                 _ => panic!("more than 2 labels currently not supported"),
             };
 
-
             label_mapping.insert(label, (*element).clone());
-            
-                       
+
             inverse_mapping.insert((*element).clone(), label);
         }
 

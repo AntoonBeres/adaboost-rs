@@ -7,33 +7,34 @@ use itertools::Itertools;
 use ndarray::prelude::*;
 use std::sync::{Arc, Mutex};
 
-//use rayon::prelude::*;
-
 use ndarray::parallel::prelude::*;
 
 /// A simple enum for representing the polarity of the stump
 /// Used so that values are limited to +1 and -1
 ///
 /// Also could get optimized away by the compiler to use less memory than a full i32/i8 when using
-/// lots classifiers
+/// lots of classifiers
 enum Polarity {
     Positive,
     Negative,
 }
 
 impl Polarity {
+    /// Get the polarity as an i32
     fn i32(&self) -> i32 {
         match self {
             Self::Positive => 1,
             Self::Negative => -1,
         }
     }
+    /// Get the polarity as an f64
     fn f64(&self) -> f64 {
         match self {
             Self::Positive => 1.,
             Self::Negative => -1.,
         }
     }
+    /// Get the polarity as a bool
     fn bool(&self) -> bool {
         match self {
             Self::Positive => true,
@@ -47,7 +48,7 @@ impl Polarity {
 ///
 /// # TLDR
 /// Stump alone weak. Stumps together strong
-pub struct Stump {
+struct Stump {
     /// Treshold of the stump
     treshold: Option<f64>,
     /// Polarity of the stump, -1 or +1
@@ -58,7 +59,7 @@ pub struct Stump {
 }
 
 impl Stump {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Stump {
             polarity: Polarity::Positive,
             treshold: None,
@@ -67,7 +68,7 @@ impl Stump {
         }
     }
 
-    pub fn predict(&self, values: &Array2<f64>) -> Vec<i32> {
+    fn predict(&self, values: &Array2<f64>) -> Vec<i32> {
         let tres = self.treshold.unwrap();
         values
             .column(self.feature_id)
@@ -81,6 +82,7 @@ impl Stump {
     }
 }
 
+/// The actual adaboost model
 pub struct AdaboostModel {
     classifiers: Vec<Stump>,
     dataset: Dataset,
@@ -116,7 +118,7 @@ impl AdaboostModel {
         }
 
         let result = y_pred
-            .par_iter()
+            .iter()
             .map(|x| match x {
                 x if *x >= 0.0 => 1,
                 x if *x < 0.0 => -1,
@@ -151,10 +153,14 @@ impl AdaboostModel {
 
         let mut weights: Vec<f64> = vec![1.0 / (n_samples as f64); n_samples];
 
+        //this one sadly can't be parallelized, because the adaboost algorithm depends on the order
+        //in which the weak classifiers are trained..
         self.classifiers.iter_mut().for_each(|stump_i| {
             // Create some reference-counted mutexes for fancy thread-safe concurrency
             let lowest_err_mutex = Arc::new(Mutex::new(f64::INFINITY));
             let stump_mutex = Arc::new(Mutex::new(stump_i));
+
+            //Here the fun begins, a concurrent for-loop over all the samples
             data.axis_iter(Axis(1))
                 .into_par_iter()
                 .enumerate()
@@ -168,6 +174,7 @@ impl AdaboostModel {
                         .collect();
 
                     tholds.par_iter().for_each(|&t| {
+                        //50% speedup by parallelizing
                         let mut predictions: Vec<i64> = vec![1; labels.len()];
                         let mut p = Polarity::Positive;
 
@@ -215,6 +222,7 @@ impl AdaboostModel {
 
             let mut stump = stump_mutex.lock().unwrap();
 
+            //guards so that the lowest_err mutex-lock gets dropped after it is no longer needed
             {
                 let lowest_err = lowest_err_mutex.lock().unwrap();
                 stump.alpha = 0.5
