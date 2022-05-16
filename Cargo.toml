@@ -1,4 +1,4 @@
-if[package]
+[package]
 name = "adaboost-rs"
 version = "0.1.0"
 edition = "2021"
