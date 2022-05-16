@@ -9,6 +9,6 @@ license = "BSD-2-Clause"
 [dependencies]
 csv = "1.1"
 ndarray-csv = "0.5"
-ndarray = "0.15"
+ndarray = {version = "0.15", features = ["rayon"] }
 itertools = "0.10"
 rayon = "1.5"
