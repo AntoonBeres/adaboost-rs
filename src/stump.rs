@@ -1,9 +1,9 @@
+// writing this in rust was a mistake, help :(
+
 #![allow(dead_code)]
 use crate::dataset::Dataset;
 use itertools::Itertools;
 use ndarray::prelude::*;
-use std::cmp::Ordering;
-use std::collections::HashMap;
 
 pub struct Stump {
     //pub value: T,
@@ -26,18 +26,14 @@ impl Stump {
 
     pub fn predict(&self, values: &Array2<f64>) -> Vec<i32> {
         let tres = self.treshold.unwrap();
-
-        let filt = |i: &f64| -> i32 {
-            if *i < tres {
-                -1 * self.polarity
-            } else {
-                1 * self.polarity
-            }
-        };
         values
             .column(self.feature_id)
-            .into_iter()
-            .map(filt)
+            .iter()
+            .map(|x| match x {
+                x if *x < tres => -self.polarity,
+                x if *x >= tres => self.polarity,
+                _ => panic!("this should never happen, is x nan?"),
+            })
             .collect()
     }
 }
@@ -59,25 +55,37 @@ impl AdaboostModel {
         result
     }
     pub fn get_prediction(&self, samples: &Array2<f64>) -> Vec<i32> {
-        let n_samples: usize = samples.ncols();
-        let mut result_all: Vec<Vec<i32>> = vec![Vec::new(); self.classifiers.len()];
 
-        let mut result = vec![0; n_samples];
+        let predicts: Vec<Vec<f64>> = self
+            .classifiers
+            .iter()
+            .map(|s| {
+                s.predict(samples)
+                    .iter_mut()
+                    .map(|res| *res as f64 * s.alpha)
+                    .collect()
+            })
+            .collect();
 
-        self.classifiers.iter().enumerate().for_each(|clf_pair| {
-            result_all[clf_pair.0] = clf_pair.1.predict(samples);
-        });
+        let mut y_pred = vec![0.; samples.nrows()];
 
-        result_all.iter().for_each(|v| {
-            v.iter().enumerate().for_each(|val_pair| {
-                result[val_pair.0] += val_pair.1;
-            });
-        });
+        for i in &predicts[..] {
+            y_pred.iter_mut().zip(i.iter()).for_each(|(y, p)| *y += *p);
+        }
+
+        let result = y_pred
+            .iter()
+            .map(|x| match x {
+                x if *x >= 0.0 => 1,
+                x if *x < 0.0 => -1,
+                _ => panic!("random unexpected stuff"),
+            })
+            .collect();
 
         result
     }
 
-    pub fn pretty_print_prediction(&self, prediction: &Vec<i32>) {
+    pub fn pretty_print_prediction(&self, prediction: &[i32]) {
         prediction.iter().enumerate().for_each(|x| {
             println!(
                 "sample {}: {}",
@@ -92,16 +100,16 @@ impl AdaboostModel {
 
     pub fn fit(&mut self) {
         let features_count = self.dataset.get_n_features();
-        let n_samples: usize = self.dataset.get_data().ncols();
+        let n_samples: usize = self.dataset.get_data().nrows();
 
         let labels = self.dataset.get_labels();
-        if (labels.len() != n_samples) {
+        if labels.len() != n_samples {
             panic!("labels-size and samplesize not the same");
         }
 
         let data = self.dataset.get_data();
 
-        let mut weights: Vec<f64> = vec![(1.0 / (n_samples as f64)); n_samples];
+        let mut weights: Vec<f64> = vec![1.0 / (n_samples as f64); n_samples];
 
         for stump in &mut self.classifiers {
             let mut lowest_err = f64::INFINITY;
@@ -109,27 +117,31 @@ impl AdaboostModel {
             for feature_id in 0..features_count {
                 let data_col = data.column(feature_id).to_vec();
                 let tholds: Vec<f64> = data_col
-                    .into_iter()
-                    .unique_by(|x| (x * 1000.) as i64)
+                    .iter()
+                    .cloned()
+                    .unique_by(|x| (*x * 1000.) as i64)
                     .collect();
 
-                let mut predictions: Vec<i32> = vec![1; n_samples];
                 tholds.iter().for_each(|t| {
-                    let p = 1;
+                    let mut predictions: Vec<i64> = vec![1; labels.len()];
+                    let mut p = 1;
 
-                    data_col.iter().enumerate().for_each(|data_p_pair| {
-                        if (data_p_pair.1 < t) {
-                            predictions[data_p_pair.0] = -1
-                        }
-                    });
+                    predictions
+                        .iter_mut()
+                        .zip(data_col.iter())
+                        .for_each(|(pred, d_point)| {
+                            if *d_point < *t {
+                                *pred = -1
+                            }
+                        });
 
-                    let error: f64 = labels
+                    let mut error: f64 = labels
                         .iter()
                         .zip(predictions.iter())
                         .zip(weights.iter())
                         .map(
                             |((label, pred), w)| {
-                                if (*pred as i64 != *label) {
+                                if *pred as i64 != *label {
                                     *w
                                 } else {
                                     0.
@@ -138,6 +150,7 @@ impl AdaboostModel {
                         )
                         .sum();
 
+                    //println!("{}", error);
                     if error > 0.5 {
                         error = 1. - error;
                         p = -1;
@@ -150,10 +163,26 @@ impl AdaboostModel {
                     }
                 });
             }
+
+            stump.alpha = 0.5
+                * ((1.0 - lowest_err + f64::MIN_POSITIVE) / (lowest_err + f64::MIN_POSITIVE)).ln();
+            let preds = stump.predict(data);
+
+            weights
+                .iter_mut()
+                .zip(labels.iter())
+                .zip(preds.iter())
+                .for_each(|((w, y), p)| {
+                    *w *= (-stump.alpha * *y as f64 * *p as f64).exp();
+                });
+
+            let sum_of_weights: f64 = weights.iter().sum();
+            weights.iter_mut().for_each(|w| {
+                *w /= sum_of_weights;
+            });
         }
 
+        //free the dataset from memory after training is done
         self.dataset.free_dset_memory();
-
-        //for tuple in samplesX {}
     }
 }

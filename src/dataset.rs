@@ -23,7 +23,7 @@ impl Dataset {
     }
     /// Get an immutable reference to the data of the dataset
     pub fn get_data(&self) -> &Array2<f64> {
-        &self.data.expect("Dataset memory has been freed!")
+        &self.data.as_ref().expect("Dataset memory has been freed!")
     }
     /// Get an immutable reference to the data-labels
     pub fn get_labels(&self) -> &Vec<i64> {
@@ -118,8 +118,18 @@ impl DatasetBuilder {
         let mut label_mapping: HashMap<i64, String> = HashMap::new();
         let mut inverse_mapping: HashMap<String, i64> = HashMap::new();
         for (index, element) in unique_labels.iter().enumerate() {
-            label_mapping.insert(index as i64, (*element).clone());
-            inverse_mapping.insert((*element).clone(), index as i64);
+            
+             let label: i64 =  match index {
+                0 => -1,
+                1 => 1,
+                _ => panic!("more than 2 labels currently not supported"),
+            };
+
+
+            label_mapping.insert(label, (*element).clone());
+            
+                       
+            inverse_mapping.insert((*element).clone(), label);
         }
 
         let labels: Vec<i64> = labels.into_iter().map(|x| inverse_mapping[&x]).collect();
