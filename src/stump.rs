@@ -4,10 +4,18 @@
 #![allow(dead_code)]
 use crate::dataset::Dataset;
 use itertools::Itertools;
+use ndarray::parallel::prelude::*;
 use ndarray::prelude::*;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
-use ndarray::parallel::prelude::*;
+/// This determines the amount of decimals after the decimal point to be considered for choosing
+/// unique tresholds, if you have a dataset with very small values (smaller, than 1e-4), consider
+/// first scaling up your dataset by multiplying the datapoints
+///
+/// Higher training-speeds can be achieved by lowering the precision, can also be lowered to
+/// prevent overfitting and getting a more general model
+const PRECISION: f64 = 1e4;
 
 /// A simple enum for representing the polarity of the stump
 /// Used so that values are limited to +1 and -1
@@ -43,6 +51,10 @@ impl Polarity {
     }
 }
 
+trait WeakLearner {
+    fn predict(&self, values: &Array2<f64>) -> Vec<i32>;
+}
+
 /// A weak-learning stump, essentially a binary tree with 2 branches and height 1
 /// Through boosting, many weak learners together perform like a strong learner
 ///
@@ -67,7 +79,9 @@ impl Stump {
             feature_id: 0,
         }
     }
+}
 
+impl WeakLearner for Stump {
     fn predict(&self, values: &Array2<f64>) -> Vec<i32> {
         let tres = self.treshold.unwrap();
         values
@@ -82,13 +96,102 @@ impl Stump {
     }
 }
 
-/// The actual adaboost model
+/// The actual adaboost model class
 pub struct AdaboostModel {
+    /// The classifiers, which are weak-learning stumps
     classifiers: Vec<Stump>,
+    /// The dataset loaded into the model
     dataset: Dataset,
 }
 
+pub enum ModelSampleType<'a> {
+    Reference(&'a Array2<f64>),
+    Move(Array2<f64>),
+}
+
+impl<'a> ModelSampleType<'a> {
+    fn get(&self) -> &Array2<f64> {
+        match self {
+            ModelSampleType::Reference(x) => x,
+            ModelSampleType::Move(x) => x,
+        }
+    }
+}
+
+pub trait ModelSample {
+    fn to_adamodel_sample(&self) -> ModelSampleType;
+}
+
+impl ModelSample for Vec<String> {
+    fn to_adamodel_sample(&self) -> ModelSampleType {
+        let samplesize = self.len();
+        let vecf64 = self
+            .iter()
+            .map(|s| f64::from_str(s.as_str()).unwrap())
+            .collect();
+        let i: Array2<f64> = Array2::from_shape_vec((1, samplesize), vecf64).unwrap();
+        ModelSampleType::Move(i)
+    }
+}
+
+impl ModelSample for Vec<f64> {
+    fn to_adamodel_sample(&self) -> ModelSampleType {
+        let samplesize = self.len();
+        ModelSampleType::Move(Array2::from_shape_vec((1, samplesize), self.to_vec()).unwrap())
+    }
+}
+
+impl ModelSample for Array2<f64> {
+    fn to_adamodel_sample(&self) -> ModelSampleType {
+        ModelSampleType::Reference(self)
+    }
+}
+
+impl ModelSample for Array2<String> {
+    fn to_adamodel_sample(&self) -> ModelSampleType {
+        let mut result: Array2<f64> = Array2::<f64>::zeros((self.shape()[0], 0));
+
+        //this could be done more efficiently.. but will do for now
+        for f in 0..self.ncols() {
+            result = ndarray::concatenate![
+                Axis(1),
+                result,
+                self.column(f)
+                    .mapv(|elem| f64::from_str(&elem).unwrap())
+                    .insert_axis(Axis(1))
+            ];
+        }
+        ModelSampleType::Move(result)
+    }
+}
+
+impl ModelSample for [Vec<String>] {
+    fn to_adamodel_sample(&self) -> ModelSampleType {
+        let length = self.len();
+        let samplesize = self.len();
+        let mut result_vec: Vec<f64> = Vec::new();
+        for i in self {
+            for j in i {
+                result_vec.push(f64::from_str(j).unwrap());
+            }
+        }
+        let i: Array2<f64> = Array2::from_shape_vec((length, samplesize), result_vec).unwrap();
+        ModelSampleType::Move(i)
+    }
+}
+
+impl ModelSample for Dataset {
+    fn to_adamodel_sample(&self) -> ModelSampleType {
+        ModelSampleType::Reference(self.get_data())
+    }
+}
+
 impl AdaboostModel {
+    /// Create a new model from a dataset with a specified amount of weak classifiers
+    /// # Arguments
+    /// * `n_classifiers` - the amount of weak classifiers to be used
+    /// * `dataset` - the `Dataset` to be loaded into the model, the model takes ownership of the
+    /// dataset
     pub fn new(n_classifiers: usize, dataset: Dataset) -> Self {
         let mut result = AdaboostModel {
             classifiers: Vec::new(),
@@ -99,10 +202,15 @@ impl AdaboostModel {
         }
         result
     }
-    pub fn get_prediction(&self, samples: &Array2<f64>) -> Vec<i32> {
+    /// Get a prediction from the trained model
+    pub fn get_prediction(&self, samples_dyn: &ModelSampleType) -> Vec<i32> {
+        let samples = samples_dyn.get();
+        if samples.ncols() != self.dataset.get_n_features() {
+            panic!("amount of features in sample doesnt correspond to amount of features in model");
+        }
         let predicts: Vec<Vec<f64>> = self
             .classifiers
-            .par_iter()
+            .iter()
             .map(|s| {
                 s.predict(samples)
                     .iter_mut()
@@ -110,7 +218,6 @@ impl AdaboostModel {
                     .collect()
             })
             .collect();
-
         let mut y_pred = vec![0.; samples.nrows()];
 
         for i in &predicts[..] {
@@ -125,7 +232,6 @@ impl AdaboostModel {
                 _ => panic!("random unexpected stuff"),
             })
             .collect();
-
         result
     }
 
@@ -141,16 +247,24 @@ impl AdaboostModel {
             );
         });
     }
-
-    pub fn fit(mut self) -> Self {
+    /// The fitting function, here the magic happens!
+    /// This function takes ownership of the model and returns the fitted model, this way of
+    /// working is necessary for parallelism
+    ///
+    /// This function heavily relies on parallelism for optimal speed (through rayon via
+    /// ndarray::parallel)
+    pub fn fit(&mut self) {
         let n_samples: usize = self.dataset.get_data().nrows();
         let labels = self.dataset.get_labels();
+
+        // check if the amount of labels corresponds to the amount of samples
         if labels.len() != n_samples {
             panic!("labels-size and samplesize not the same");
         }
 
         let data = self.dataset.get_data();
 
+        //Initially all samples have equal weight, weights are normalized
         let mut weights: Vec<f64> = vec![1.0 / (n_samples as f64); n_samples];
 
         //this one sadly can't be parallelized, because the adaboost algorithm depends on the order
@@ -160,24 +274,27 @@ impl AdaboostModel {
             let lowest_err_mutex = Arc::new(Mutex::new(f64::INFINITY));
             let stump_mutex = Arc::new(Mutex::new(stump_i));
 
-            //Here the fun begins, a concurrent for-loop over all the samples
+            //Here the fun begins, a concurrent for-loop over all the columns, takes only a single
+            //column from the dataset (single feature) and loops over the values concurrentls, this
+            //is to find the best feature for the classifier
             data.axis_iter(Axis(1))
                 .into_par_iter()
                 .enumerate()
                 .for_each(|(feature_id, data_col)| {
                     let stump_copy = Arc::clone(&stump_mutex);
 
+                    //find all the unique values in the columns to use as potential tresholds
                     let tholds: Vec<f64> = data_col
                         .iter()
                         .cloned()
-                        .unique_by(|x| (*x * 1000.) as i64)
+                        //multiplication by 1000 and cast to int because floats are never really unique
+                        .unique_by(|x| (*x * PRECISION) as i64)
                         .collect();
 
+                    //another 50% speedup on my machine by parallelizing this :) me=happy
                     tholds.par_iter().for_each(|&t| {
-                        //50% speedup by parallelizing
                         let mut predictions: Vec<i64> = vec![1; labels.len()];
                         let mut p = Polarity::Positive;
-
                         predictions
                             .iter_mut()
                             .zip(data_col.iter())
@@ -186,7 +303,7 @@ impl AdaboostModel {
                                     *pred = -1
                                 }
                             });
-                        // Calculate the error
+                        // Calculate the error by summing the weights of the misclassified samples
                         let mut error: f64 = labels
                             .iter()
                             .zip(predictions.iter())
@@ -211,17 +328,19 @@ impl AdaboostModel {
                         // stump classifier
                         let mut lowest_err = lowest_err_mutex.lock().unwrap();
                         if error < *lowest_err {
+                            *lowest_err = error;
+                            //drop the lock as soon as possible so other threads can continue,
+                            //slight micro-optimization..
+                            std::mem::drop(lowest_err);
                             let mut stump = stump_copy.lock().unwrap();
                             stump.polarity = p;
-                            stump.treshold = Some(t.clone());
+                            stump.treshold = Some(t);
                             stump.feature_id = feature_id;
-                            *lowest_err = error;
                         }
                     });
                 });
 
             let mut stump = stump_mutex.lock().unwrap();
-
             //guards so that the lowest_err mutex-lock gets dropped after it is no longer needed
             {
                 let lowest_err = lowest_err_mutex.lock().unwrap();
@@ -229,18 +348,21 @@ impl AdaboostModel {
                     * ((1.0 - *lowest_err + f64::MIN_POSITIVE) / (*lowest_err + f64::MIN_POSITIVE))
                         .ln();
             }
+            //predictions of this stump
             let preds = stump.predict(data);
+
             // Update the weights of the samples
+            let mut sum_of_weights = 0.;
             weights
                 .iter_mut()
                 .zip(labels.iter())
                 .zip(preds.iter())
                 .for_each(|((w, y), p)| {
                     *w *= (-stump.alpha * *y as f64 * *p as f64).exp();
+                    sum_of_weights += *w;
                 });
-
-            let sum_of_weights: f64 = weights.iter().sum();
-            weights.par_iter_mut().for_each(|w| {
+            //renormalize the weights again
+            weights.iter_mut().for_each(|w| {
                 *w /= sum_of_weights;
             });
         });
@@ -248,6 +370,5 @@ impl AdaboostModel {
         // free the dataset from memory after training is done, this is done for memory-efficiency
         // reasons
         self.dataset.free_dset_memory();
-        self
     }
 }

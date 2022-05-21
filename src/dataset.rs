@@ -23,7 +23,7 @@ impl Dataset {
     }
     /// Get an immutable reference to the data of the dataset
     pub fn get_data(&self) -> &Array2<f64> {
-        &self.data.as_ref().expect("Dataset memory has been freed!")
+        self.data.as_ref().expect("Dataset memory has been freed!")
     }
     /// Get an immutable reference to the data-labels
     pub fn get_labels(&self) -> &Vec<i64> {

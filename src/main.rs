@@ -1,17 +1,15 @@
-#![allow(dead_code)]
-#![recursion_limit = "256"]
-mod dataset;
-mod stump;
-
+pub mod dataset;
+pub mod stump;
 use ndarray::Array2;
+use ndarray_csv::Array2Reader;
 use stump::AdaboostModel;
+use stump::ModelSample;
 
 //use ndarray::prelude::*;
 fn main() {
     let cols: Vec<usize> = (2..32).collect();
     //2..32
     //
-
     let i = dataset::DatasetBuilder::new()
         .read_csv("datasets/breast-cancer.csv")
         .class_column(1)
@@ -30,14 +28,26 @@ fn main() {
     ]);
 
     let start = std::time::Instant::now();
-    let _model = AdaboostModel::new(dset.get_n_features(), dset).fit();
+    let mut model = AdaboostModel::new(dset.get_n_features(), dset);
+    model.fit();
     let end = start.elapsed();
 
     println!("time elapsed for fitting: {:?}", end);
+    
 
-    //let pred = model.get_prediction(&k);
+    let validation_set = dataset::DatasetBuilder::new().read_csv("datasets/breast-cancer_test.csv")
+        .class_column(1)
+        .select_columns(&cols[..]).build();
 
-    //model.pretty_print_prediction(&pred);
+
+    
+
+    let test = validation_set.to_adamodel_sample();
+    println!("succeesss");
+    let pred = model.get_prediction(&test);
+
+
+    model.pretty_print_prediction(&pred);
 
     //println!("datacols: {}", dset.get_data().ncols());
     //println!("labels: {}", dset.get_labels().len());
