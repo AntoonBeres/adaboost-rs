@@ -1,12 +1,12 @@
 # adaboost-rs
 
 ## Compilation
-compile the library with:
-`cargo build --release`
+compile the library with:  
+`cargo build --release`  
 ## Running examples
-first compile the example eg:
-`cargo build --release --example breast-cancer`
-then run:
+first compile the example eg:  
+`cargo build --release --example breast-cancer`  
+then run:  
 `./target/release/examples/breast-cancer`
 
 
