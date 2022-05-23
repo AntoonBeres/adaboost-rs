@@ -10,6 +10,6 @@ then run:
 `./target/release/examples/breast-cancer`
 
 
-Or just instantly run the example without storing the compiled binary:
+Or just instantly run the example without storing the compiled binary:  
 `cargo run --release --example breast-cancer`
 
