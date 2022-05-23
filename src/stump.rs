@@ -6,6 +6,7 @@ use crate::dataset::Dataset;
 use itertools::Itertools;
 use ndarray::parallel::prelude::*;
 use ndarray::prelude::*;
+use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
@@ -53,6 +54,10 @@ impl Polarity {
 
 trait WeakLearner {
     fn predict(&self, values: &Array2<f64>) -> Vec<i32>;
+    fn get_alpha(&self) -> f64;
+    fn set_alpha(&mut self, alpha: f64);
+
+    fn train(weights: Vec<f64>, data_set: &Dataset) -> Self;
 }
 
 /// A weak-learning stump, essentially a binary tree with 2 branches and height 1
@@ -81,6 +86,12 @@ impl Stump {
     }
 }
 
+/*impl Debug for Stump {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        
+    }
+}*/
+
 impl WeakLearner for Stump {
     fn predict(&self, values: &Array2<f64>) -> Vec<i32> {
         let tres = self.treshold.unwrap();
@@ -93,6 +104,93 @@ impl WeakLearner for Stump {
                 _ => panic!("this should never happen, is x nan?"),
             })
             .collect()
+    }
+    fn get_alpha(&self) -> f64 {
+        self.alpha
+    }
+    fn set_alpha(&mut self, alpha: f64) {
+        self.alpha = alpha;
+    }
+    fn train(weights: Vec<f64>, data_set: &Dataset) -> Self {
+        let result = Self::new();
+        let stump_mutex = Arc::new(Mutex::new(result));
+        let lowest_err_mutex = Arc::new(Mutex::new(f64::INFINITY));
+        let data = data_set.get_data();
+        let labels = data_set.get_labels();
+        data.axis_iter(Axis(1))
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(feature_id, data_col)| {
+                let stump_copy = Arc::clone(&stump_mutex);
+
+                //find all the unique values in the columns to use as potential tresholds
+                let tholds: Vec<f64> = data_col
+                    .iter()
+                    .cloned()
+                    //multiplication by 1000 and cast to int because floats are never really unique
+                    .unique_by(|x| (*x * PRECISION) as i64)
+                    .collect();
+
+                //another 50% speedup on my machine by parallelizing this :) me=happy
+                tholds.par_iter().for_each(|&t| {
+                    let mut predictions: Vec<i64> = vec![1; labels.len()];
+                    let mut p = Polarity::Positive;
+                    predictions
+                        .iter_mut()
+                        .zip(data_col.iter())
+                        .for_each(|(pred, d_point)| {
+                            if *d_point < t {
+                                *pred = -1
+                            }
+                        });
+                    // Calculate the error by summing the weights of the misclassified samples
+                    let mut error: f64 = labels
+                        .iter()
+                        .zip(predictions.iter())
+                        .zip(weights.iter())
+                        .map(
+                            |((label, pred), w)| {
+                                if *pred as i64 != *label {
+                                    *w
+                                } else {
+                                    0.
+                                }
+                            },
+                        )
+                        .sum();
+                    // If the error is greater than 0.5, invert the weak learning stump, by
+                    // inverting the polarity
+                    if error > 0.5 {
+                        error = 1. - error;
+                        p = Polarity::Negative;
+                    }
+                    // If this error is smaller than the previously smallest error, update the
+                    // stump classifier
+                    let mut lowest_err = lowest_err_mutex.lock().unwrap();
+                    if error < *lowest_err {
+                        *lowest_err = error;
+                        //drop the lock as soon as possible so other threads can continue,
+                        //slight micro-optimization..
+                        std::mem::drop(lowest_err);
+                        let mut stump = stump_copy.lock().unwrap();
+                        stump.polarity = p;
+                        stump.treshold = Some(t);
+                        stump.feature_id = feature_id;
+                    }
+                });
+            });
+
+        {
+        let mut stump = stump_mutex.lock().unwrap();
+        //guards so that the lowest_err mutex-lock gets dropped after it is no longer needed
+            let lowest_err = lowest_err_mutex.lock().unwrap();
+            stump.alpha = 0.5
+                * ((1.0 - *lowest_err + f64::MIN_POSITIVE) / (*lowest_err + f64::MIN_POSITIVE))
+                    .ln();
+        }
+        let result = Arc::try_unwrap(stump_mutex).unwrap_or(panic!("error")).into_inner().unwrap();
+        result
+        //Self::new() //TODO
     }
 }
 
@@ -348,6 +446,14 @@ impl AdaboostModel {
                     * ((1.0 - *lowest_err + f64::MIN_POSITIVE) / (*lowest_err + f64::MIN_POSITIVE))
                         .ln();
             }
+
+            // here the old code ends
+            //
+            //
+
+
+            
+
             //predictions of this stump
             let preds = stump.predict(data);
 
