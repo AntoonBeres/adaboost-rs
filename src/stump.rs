@@ -6,7 +6,6 @@ use crate::dataset::Dataset;
 use itertools::Itertools;
 use ndarray::parallel::prelude::*;
 use ndarray::prelude::*;
-use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
@@ -57,7 +56,7 @@ trait WeakLearner {
     fn get_alpha(&self) -> f64;
     fn set_alpha(&mut self, alpha: f64);
 
-    fn train(weights: Vec<f64>, data_set: &Dataset) -> Self;
+    fn train(weights: &Vec<f64>, data_set: &Dataset) -> Self;
 }
 
 /// A weak-learning stump, essentially a binary tree with 2 branches and height 1
@@ -111,7 +110,7 @@ impl WeakLearner for Stump {
     fn set_alpha(&mut self, alpha: f64) {
         self.alpha = alpha;
     }
-    fn train(weights: Vec<f64>, data_set: &Dataset) -> Self {
+    fn train(weights: &Vec<f64>, data_set: &Dataset) -> Self {
         let result = Self::new();
         let stump_mutex = Arc::new(Mutex::new(result));
         let lowest_err_mutex = Arc::new(Mutex::new(f64::INFINITY));
@@ -133,7 +132,7 @@ impl WeakLearner for Stump {
 
                 //another 50% speedup on my machine by parallelizing this :) me=happy
                 tholds.par_iter().for_each(|&t| {
-                    let mut predictions: Vec<i64> = vec![1; labels.len()];
+                    let mut predictions: Vec<i32> = vec![1; labels.len()];
                     let mut p = Polarity::Positive;
                     predictions
                         .iter_mut()
@@ -150,7 +149,7 @@ impl WeakLearner for Stump {
                         .zip(weights.iter())
                         .map(
                             |((label, pred), w)| {
-                                if *pred as i64 != *label {
+                                if *pred != *label {
                                     *w
                                 } else {
                                     0.
@@ -301,8 +300,10 @@ impl AdaboostModel {
         result
     }
     /// Get a prediction from the trained model
-    pub fn get_prediction(&self, samples_dyn: &ModelSampleType) -> Vec<i32> {
-        let samples = samples_dyn.get();
+    pub fn get_prediction(&self, samples_dyn: &dyn ModelSample) -> Vec<i32> {
+
+        let m_samples = samples_dyn.to_adamodel_sample();
+        let samples = m_samples.get();
         if samples.ncols() != self.dataset.get_n_features() {
             panic!("amount of features in sample doesnt correspond to amount of features in model");
         }
@@ -340,7 +341,7 @@ impl AdaboostModel {
                 x.0,
                 self.dataset
                     .get_label_mapping()
-                    .get(&(*x.1 as i64))
+                    .get(&(*x.1 as i32))
                     .unwrap()
             );
         });
@@ -391,7 +392,7 @@ impl AdaboostModel {
 
                     //another 50% speedup on my machine by parallelizing this :) me=happy
                     tholds.par_iter().for_each(|&t| {
-                        let mut predictions: Vec<i64> = vec![1; labels.len()];
+                        let mut predictions: Vec<i32> = vec![1; labels.len()];
                         let mut p = Polarity::Positive;
                         predictions
                             .iter_mut()
@@ -408,7 +409,7 @@ impl AdaboostModel {
                             .zip(weights.iter())
                             .map(
                                 |((label, pred), w)| {
-                                    if *pred as i64 != *label {
+                                    if *pred != *label {
                                         *w
                                     } else {
                                         0.

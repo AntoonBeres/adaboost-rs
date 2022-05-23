@@ -44,4 +44,4 @@ def split_data_set(filename, rel_training_size, rel_testing_size):
             writer.writerow(i)
 
 
-split_data_set("diabetes.csv", 0.9, 0.1)
+split_data_set("breast-cancer.csv", 0.9, 0.1)

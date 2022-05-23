@@ -11,9 +11,9 @@ pub struct Dataset {
     /// The actual data in the dataset
     data: Option<Array2<f64>>,
     /// The labels of the dataset in the form integers
-    labels: Vec<i64>,
+    labels: Vec<i32>,
     /// A mapping of label-id's to their actual names
-    label_names: HashMap<i64, String>,
+    label_names: HashMap<i32, String>,
 }
 
 impl Dataset {
@@ -26,11 +26,11 @@ impl Dataset {
         self.data.as_ref().expect("Dataset memory has been freed!")
     }
     /// Get an immutable reference to the data-labels
-    pub fn get_labels(&self) -> &Vec<i64> {
+    pub fn get_labels(&self) -> &Vec<i32> {
         &self.labels
     }
     /// Get the mapping of label-id's (integers) to corresponding names
-    pub fn get_label_mapping(&self) -> &HashMap<i64, String> {
+    pub fn get_label_mapping(&self) -> &HashMap<i32, String> {
         &self.label_names
     }
 
@@ -115,10 +115,10 @@ impl DatasetBuilder {
 
         let labels = unpr_data.column(self.category_col).to_vec();
         let unique_labels: Vec<&String> = labels.iter().unique().collect();
-        let mut label_mapping: HashMap<i64, String> = HashMap::new();
-        let mut inverse_mapping: HashMap<String, i64> = HashMap::new();
+        let mut label_mapping: HashMap<i32, String> = HashMap::new();
+        let mut inverse_mapping: HashMap<String, i32> = HashMap::new();
         for (index, element) in unique_labels.iter().enumerate() {
-            let label: i64 = match index {
+            let label: i32 = match index {
                 0 => -1,
                 1 => 1,
                 _ => panic!("more than 2 labels currently not supported"),
@@ -129,7 +129,7 @@ impl DatasetBuilder {
             inverse_mapping.insert((*element).clone(), label);
         }
 
-        let labels: Vec<i64> = labels.into_iter().map(|x| inverse_mapping[&x]).collect();
+        let labels: Vec<i32> = labels.into_iter().map(|x| inverse_mapping[&x]).collect();
 
         Dataset {
             data: Some(features),
