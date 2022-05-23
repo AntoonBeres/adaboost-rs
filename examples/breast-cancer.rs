@@ -1,8 +1,5 @@
-pub mod dataset;
-pub mod stump;
-use stump::AdaboostModel;
-use stump::ModelSample;
-
+use adaboost_rs::AdaboostModel;
+use adaboost_rs::dataset;
 
 //new branch
 //use ndarray::prelude::*;
