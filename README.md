@@ -1,5 +1,5 @@
 # adaboost-rs
-
+A simple implementation of adaboost in Rust using (concurrent) decision stumps as weak learners 
 ## Compilation
 compile the library with:  
 `cargo build --release`  
