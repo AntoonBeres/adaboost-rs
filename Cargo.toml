@@ -1,6 +1,6 @@
 [package]
 name = "adaboost-rs"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Antoon <antoonberes@hotmail.com>"]
 license = "BSD-2-Clause"
@@ -9,5 +9,9 @@ license = "BSD-2-Clause"
 [dependencies]
 csv = "1.1"
 ndarray-csv = "0.5"
-ndarray = "0.15"
+ndarray = {version = "0.15", features = ["rayon"] }
 itertools = "0.10"
+rayon = "1.5"
+
+[[example]]
+name = "breast-cancer"
